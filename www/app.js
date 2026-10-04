@@ -153,7 +153,8 @@
   };
 
   const LS = {
-    favorites: 'hmq_favorites_v1', recent: 'hmq_recent_v1', sound: 'hmq_sound_v1',
+    favorites: 'hmq_favorites_v1', recent: 'hmq_recent_v1',
+    bgm: 'hmq_bgm_v1', sound: 'hmq_sound_v1',
     vibration: 'hmq_vibration_v1', firstHint: 'hmq_first_hint_v1'
   };
   const SS = { seen: 'hmq_session_seen_v1', adCount: 'hmq_ad_count_v1', adTarget: 'hmq_ad_target_v1' };
@@ -167,6 +168,7 @@
     favorites: new Set(readJSON(localStorage, LS.favorites, [])),
     recent: readJSON(localStorage, LS.recent, []),
     sessionSeen: new Set(readJSON(sessionStorage, SS.seen, [])),
+    bgm: readBool(LS.bgm, true),
     sound: readBool(LS.sound, true),
     vibration: readBool(LS.vibration, true),
     showFirstHint: localStorage.getItem(LS.firstHint) !== 'done',
@@ -175,6 +177,72 @@
     lastCategories: []
   };
   persistAdState();
+
+  const audioFX = (() => {
+    const bgm = new Audio('audio/bgm_main.mp3');
+    bgm.loop = true;
+    bgm.preload = 'auto';
+    bgm.volume = 0.20;
+
+    const tap = new Audio('audio/se_tap.mp3');
+    tap.preload = 'auto';
+    tap.volume = 0.42;
+
+    const answer = new Audio('audio/se_answer.mp3');
+    answer.preload = 'auto';
+    answer.volume = 0.58;
+
+    let unlocked = false;
+
+    function safePlay(audio, restart = false) {
+      try {
+        if (restart) audio.currentTime = 0;
+        const p = audio.play();
+        if (p && typeof p.catch === 'function') p.catch(() => {});
+        return true;
+      } catch {
+        return false;
+      }
+    }
+
+    function startBgm() {
+      if (!unlocked || !state.bgm || document.hidden) return;
+      safePlay(bgm, false);
+    }
+
+    function pauseBgm() {
+      try { bgm.pause(); } catch {}
+    }
+
+    function unlockAndStartBgm() {
+      unlocked = true;
+      startBgm();
+    }
+
+    function setBgmEnabled(enabled) {
+      if (enabled) startBgm();
+      else pauseBgm();
+    }
+
+    function playTap() {
+      if (!state.sound) return;
+      safePlay(tap, true);
+    }
+
+    function playAnswer() {
+      if (!state.sound) return;
+      safePlay(answer, true);
+    }
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) pauseBgm();
+      else startBgm();
+    });
+    window.addEventListener('pagehide', pauseBgm);
+    window.addEventListener('pageshow', startBgm);
+
+    return { unlockAndStartBgm, setBgmEnabled, startBgm, pauseBgm, playTap, playAnswer };
+  })();
 
   const el = document.getElementById('screen');
   const modalRoot = document.getElementById('modalRoot');
@@ -204,6 +272,7 @@
   }
 
   function render() {
+    el.classList.toggle('scrollable', state.screen === 'favorites');
     if (state.screen === 'home') renderHome();
     else if (state.screen === 'category') renderCategory();
     else if (state.screen === 'quiz') renderQuiz();
@@ -216,7 +285,7 @@
   function renderHome() {
     el.innerHTML = `
       <div class="header"><div></div><div></div><button class="icon-btn" data-action="settings" aria-label="設定">⚙</button></div>
-      <div class="logo-wrap"><h1 class="logo">どのくらい？</h1><p class="subtitle">予想！数字クイズ</p><div class="test-badge">TestFlight版・1500問</div></div>
+      <div class="logo-wrap"><h1 class="logo">どのくらい？</h1><p class="subtitle">予想！数字クイズ</p></div>
       <div class="stack">
         <button class="btn btn-primary" data-action="play-all">おまかせで遊ぶ</button>
         <button class="btn btn-secondary" data-action="category">カテゴリから選ぶ</button>
@@ -279,21 +348,24 @@
   function renderSettings() {
     el.innerHTML = `${header('設定')}
       <div class="settings-group"><div class="settings-label">サウンド</div>
+        <div class="setting-row"><strong>BGM</strong><button class="switch ${state.bgm?'on':''}" data-action="toggle-bgm" aria-label="BGM"></button></div>
         <div class="setting-row"><strong>効果音</strong><button class="switch ${state.sound?'on':''}" data-action="toggle-sound" aria-label="効果音"></button></div>
         <div class="setting-row"><strong>振動</strong><button class="switch ${state.vibration?'on':''}" data-action="toggle-vibration" aria-label="振動"></button></div>
       </div>
       <div class="settings-group"><div class="settings-label">このアプリについて</div>
         <div class="info-card"><strong>どのくらい？ - 予想！数字クイズ</strong><br>数字を予想して、答えを見て楽しむクイズアプリです。回答入力やスコアはありません。</div>
-        <div class="info-card">問題データは端末内で動作します。現在は1500問入りのTestFlightテスト版です。</div>
-        <button class="btn btn-secondary" style="width:100%;min-height:52px;font-size:15px" data-action="privacy-options">広告のプライバシー設定</button>
+        <div class="info-card">1500問のクイズデータを端末内に収録しています。</div>
+        <button class="btn btn-secondary privacy-btn" data-action="privacy-options">広告のプライバシー設定</button>
       </div>
-      <div class="version">HowMuchQuiz TestFlight v0.3 / 1500問</div>`;
+      <div class="version">HowMuchQuiz v1.0 / 1500問</div>`;
   }
 
   function bindActions() {
     el.querySelectorAll('[data-action]').forEach(node => node.addEventListener('click', (e) => {
       e.stopPropagation();
       const action = node.dataset.action;
+      audioFX.unlockAndStartBgm();
+      if (action !== 'show-answer') audioFX.playTap();
       if (action === 'back') goBack();
       else if (action === 'settings') { state.screen='settings'; render(); }
       else if (action === 'category') { state.screen='category'; render(); }
@@ -306,6 +378,12 @@
       else if (action === 'toggle-favorite') toggleFavorite(state.current.id);
       else if (action === 'remove-favorite') { toggleFavorite(node.dataset.id, false); render(); }
       else if (action === 'open-favorite') openFavorite(node.dataset.id);
+      else if (action === 'toggle-bgm') {
+        state.bgm=!state.bgm;
+        localStorage.setItem(LS.bgm,String(state.bgm));
+        audioFX.setBgmEnabled(state.bgm);
+        render();
+      }
       else if (action === 'toggle-sound') { state.sound=!state.sound; localStorage.setItem(LS.sound,String(state.sound)); render(); }
       else if (action === 'toggle-vibration') { state.vibration=!state.vibration; localStorage.setItem(LS.vibration,String(state.vibration)); render(); }
       else if (action === 'privacy-options') { nativeAds.showPrivacyOptions().then(ok => { if (!ok) showToast('現在、変更できる広告設定はありません'); }); }
@@ -394,15 +472,7 @@
   }
 
   function playRevealEffects() {
-    if (state.sound) {
-      try {
-        const AC = window.AudioContext || window.webkitAudioContext;
-        const ctx = new AC(); const osc=ctx.createOscillator(); const gain=ctx.createGain();
-        osc.type='sine'; osc.frequency.setValueAtTime(520,ctx.currentTime); osc.frequency.exponentialRampToValueAtTime(720,ctx.currentTime+.11);
-        gain.gain.setValueAtTime(.0001,ctx.currentTime); gain.gain.exponentialRampToValueAtTime(.08,ctx.currentTime+.015); gain.gain.exponentialRampToValueAtTime(.0001,ctx.currentTime+.18);
-        osc.connect(gain); gain.connect(ctx.destination); osc.start(); osc.stop(ctx.currentTime+.19);
-      } catch {}
-    }
+    audioFX.playAnswer();
     if (state.vibration && navigator.vibrate) navigator.vibrate(28);
   }
 

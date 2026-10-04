@@ -1,6 +1,6 @@
 {
   "name": "howmuchquiz",
-  "version": "0.3.0",
+  "version": "1.0.0",
   "private": true,
   "scripts": {
     "prepare:www": "node scripts/prepare-www.mjs",

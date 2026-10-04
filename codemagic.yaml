@@ -1,6 +1,6 @@
 workflows:
-  ios-testflight:
-    name: HowMuchQuiz TestFlight
+  ios-release:
+    name: HowMuchQuiz Release
     max_build_duration: 120
     instance_type: mac_mini_m2
 

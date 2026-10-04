@@ -1,0 +1,71 @@
+workflows:
+  ios-testflight:
+    name: HowMuchQuiz TestFlight
+    max_build_duration: 120
+    instance_type: mac_mini_m2
+
+    integrations:
+      app_store_connect: oddiro_asc_key
+
+    environment:
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.yutaXXX.howmuchquiz
+      vars:
+        XCODE_PROJECT: "ios/App/App.xcodeproj"
+        XCODE_SCHEME: "App"
+        ADMOB_APP_ID: "ca-app-pub-8174756915786797~5894309090"
+      node: 22
+      xcode: latest
+
+    scripts:
+      - name: Install npm dependencies
+        script: |
+          npm install --no-audit --no-fund
+
+      - name: Prepare web assets
+        script: |
+          npm run prepare:www
+
+      - name: Create fresh Capacitor iOS project (SPM)
+        script: |
+          rm -rf ios
+          npx cap add ios --packagemanager SPM
+          npx cap sync ios
+
+      - name: Configure iOS / AdMob
+        script: |
+          python3 scripts/configure-ios.py
+
+      - name: Resolve Swift packages
+        script: |
+          xcodebuild -resolvePackageDependencies \
+            -project "$XCODE_PROJECT" \
+            -scheme "$XCODE_SCHEME"
+
+      - name: Set up code signing
+        script: |
+          xcode-project use-profiles --project "$XCODE_PROJECT"
+
+      - name: Set build number
+        script: |
+          cd ios/App
+          agvtool new-version -all "$BUILD_NUMBER"
+
+      - name: Build IPA
+        script: |
+          xcode-project build-ipa \
+            --project "$XCODE_PROJECT" \
+            --scheme "$XCODE_SCHEME"
+
+    artifacts:
+      - ios/App/build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+      - $HOME/Library/Developer/Xcode/DerivedData/**/Build/**/*.app
+      - $HOME/Library/Developer/Xcode/DerivedData/**/Build/**/*.dSYM
+
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true
+        submit_to_app_store: false

@@ -1,0 +1,10 @@
+{
+  "appId": "com.yutaXXX.howmuchquiz",
+  "appName": "どのくらい？",
+  "webDir": "www",
+  "bundledWebRuntime": false,
+  "ios": {
+    "contentInset": "automatic",
+    "preferredContentMode": "mobile"
+  }
+}

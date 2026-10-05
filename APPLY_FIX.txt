@@ -1,0 +1,17 @@
+HowMuchQuiz 3000問データ補完差分
+
+C:\dev\HowMuchQuiz に、このZIPの内容をフォルダ構成を保ったまま上書きしてください。
+
+追加されるファイル:
+- www/questions_1.js
+- www/questions_2.js
+- www/questions_3.js
+
+配置後:
+1. C:\dev\HowMuchQuiz\www\questions_1.js が存在することを確認
+2. GitHub Desktopで3ファイルがChangesに表示されることを確認
+3. Commit
+4. Push
+5. Codemagicで再ビルド
+
+旧 www/questions.js は3000問版では不要です。

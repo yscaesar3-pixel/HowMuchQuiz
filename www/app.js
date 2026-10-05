@@ -152,18 +152,18 @@
   })();
 
   const CATEGORIES = {
-    human:   { label: '人間・からだ', icon: '●' },
-    animal:  { label: '動物', icon: '◆' },
-    life:    { label: '暮らし', icon: '⌂' },
-    food:    { label: '食べ物', icon: '●' },
-    earth:   { label: '地球', icon: '◎' },
-    science: { label: '科学', icon: '△' },
-    space:   { label: '宇宙', icon: '★' },
-    japan:   { label: '日本', icon: '▲' },
-    world:   { label: '世界', icon: '○' },
-    transport:{ label: '乗り物', icon: '▰' },
-    sports:  { label: 'スポーツ', icon: '●' },
-    history: { label: '歴史', icon: '◷' }
+    human:    { label: '人間・からだ', icon: 'images/category_human.webp' },
+    animal:   { label: '動物', icon: 'images/category_animal.webp' },
+    life:     { label: '暮らし', icon: 'images/category_life.webp' },
+    food:     { label: '食べ物', icon: 'images/category_food.webp' },
+    earth:    { label: '地球', icon: 'images/category_earth.webp' },
+    science:  { label: '科学', icon: 'images/category_science.webp' },
+    space:    { label: '宇宙', icon: 'images/category_space.webp' },
+    japan:    { label: '日本', icon: 'images/category_japan.webp' },
+    world:    { label: '世界', icon: 'images/category_world.webp' },
+    transport:{ label: '乗り物', icon: 'images/category_transport.webp' },
+    sports:   { label: 'スポーツ', icon: 'images/category_sports.webp' },
+    history:  { label: '歴史', icon: 'images/category_history.webp' }
   };
 
   const LS = {
@@ -227,44 +227,159 @@
   })();
 
   const audioFX = (() => {
-    const bgm = new Audio('audio/bgm_main.mp3');
-    bgm.loop = true;
-    bgm.preload = 'auto';
-    bgm.volume = 0.20;
+    // Web Audio APIを使うことで、iOSロック画面にBGMのメディア再生UIを残さない。
+    const FILES = {
+      bgm: 'audio/bgm_main.mp3',
+      tap: 'audio/se_tap.mp3',
+      answer: 'audio/se_answer.mp3'
+    };
+    const VOLUMES = { bgm: 0.20, tap: 0.42, answer: 0.58 };
 
-    const tap = new Audio('audio/se_tap.mp3');
-    tap.preload = 'auto';
-    tap.volume = 0.42;
-
-    const answer = new Audio('audio/se_answer.mp3');
-    answer.preload = 'auto';
-    answer.volume = 0.58;
-
+    let ctx = null;
+    let master = null;
     let unlocked = false;
+    const buffers = new Map();
+    const loads = new Map();
 
-    function safePlay(audio, restart = false) {
+    let bgmSource = null;
+    let bgmGain = null;
+    let bgmOffset = 0;
+    let bgmStartTime = 0;
+    let bgmStartOffset = 0;
+
+    function clearMediaSession() {
       try {
-        if (restart) audio.currentTime = 0;
-        const p = audio.play();
-        if (p && typeof p.catch === 'function') p.catch(() => {});
-        return true;
-      } catch {
-        return false;
-      }
+        if ('mediaSession' in navigator) {
+          navigator.mediaSession.metadata = null;
+          navigator.mediaSession.playbackState = 'none';
+        }
+      } catch {}
     }
 
-    function startBgm() {
-      if (!unlocked || !state.bgm || document.hidden) return;
-      safePlay(bgm, false);
+    function ensureContext() {
+      if (ctx) return ctx;
+      const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContextCtor) return null;
+      ctx = new AudioContextCtor();
+      master = ctx.createGain();
+      master.gain.value = 1;
+      master.connect(ctx.destination);
+      clearMediaSession();
+      return ctx;
+    }
+
+    async function resumeContext() {
+      const c = ensureContext();
+      if (!c) return null;
+      try {
+        if (c.state === 'suspended') await c.resume();
+      } catch {}
+      clearMediaSession();
+      return c;
+    }
+
+    async function loadBuffer(key) {
+      if (buffers.has(key)) return buffers.get(key);
+      if (loads.has(key)) return loads.get(key);
+      const task = (async () => {
+        try {
+          const c = ensureContext();
+          if (!c) return null;
+          const res = await fetch(FILES[key]);
+          if (!res.ok) throw new Error(`Audio fetch failed: ${FILES[key]}`);
+          const arr = await res.arrayBuffer();
+          const buf = await c.decodeAudioData(arr);
+          buffers.set(key, buf);
+          return buf;
+        } catch (e) {
+          console.warn(`Audio load failed: ${key}`, e);
+          return null;
+        } finally {
+          loads.delete(key);
+        }
+      })();
+      loads.set(key, task);
+      return task;
+    }
+
+    async function playOneShot(key) {
+      const c = await resumeContext();
+      if (!c) return;
+      const buffer = await loadBuffer(key);
+      if (!buffer) return;
+      try {
+        const source = c.createBufferSource();
+        const gain = c.createGain();
+        source.buffer = buffer;
+        gain.gain.value = VOLUMES[key];
+        source.connect(gain);
+        gain.connect(master);
+        source.start(0);
+      } catch (e) {
+        console.warn(`Audio play failed: ${key}`, e);
+      }
+      clearMediaSession();
+    }
+
+    async function startBgm() {
+      if (!unlocked || !state.bgm || document.hidden || bgmSource) return;
+      const c = await resumeContext();
+      if (!c || !state.bgm || document.hidden || bgmSource) return;
+      const buffer = await loadBuffer('bgm');
+      if (!buffer || !state.bgm || document.hidden || bgmSource) return;
+      try {
+        const source = c.createBufferSource();
+        const gain = c.createGain();
+        source.buffer = buffer;
+        source.loop = true;
+        gain.gain.value = VOLUMES.bgm;
+        source.connect(gain);
+        gain.connect(master);
+
+        const offset = buffer.duration > 0 ? (bgmOffset % buffer.duration) : 0;
+        bgmStartOffset = offset;
+        bgmStartTime = c.currentTime;
+        bgmSource = source;
+        bgmGain = gain;
+        source.onended = () => {
+          if (bgmSource === source) {
+            bgmSource = null;
+            bgmGain = null;
+          }
+        };
+        source.start(0, offset);
+      } catch (e) {
+        console.warn('BGM start failed', e);
+        bgmSource = null;
+        bgmGain = null;
+      }
+      clearMediaSession();
     }
 
     function pauseBgm() {
-      try { bgm.pause(); } catch {}
+      if (!bgmSource) {
+        clearMediaSession();
+        return;
+      }
+      try {
+        const buffer = buffers.get('bgm');
+        if (ctx && buffer?.duration) {
+          const elapsed = Math.max(0, ctx.currentTime - bgmStartTime);
+          bgmOffset = (bgmStartOffset + elapsed) % buffer.duration;
+        }
+        const source = bgmSource;
+        bgmSource = null;
+        bgmGain = null;
+        source.onended = null;
+        source.stop(0);
+        source.disconnect();
+      } catch {}
+      clearMediaSession();
     }
 
     function unlockAndStartBgm() {
       unlocked = true;
-      startBgm();
+      resumeContext().then(startBgm);
     }
 
     function setBgmEnabled(enabled) {
@@ -274,12 +389,12 @@
 
     function playTap() {
       if (!state.sound) return;
-      safePlay(tap, true);
+      playOneShot('tap');
     }
 
     function playAnswer() {
       if (!state.sound) return;
-      safePlay(answer, true);
+      playOneShot('answer');
     }
 
     document.addEventListener('visibilitychange', () => {
@@ -287,8 +402,12 @@
       else startBgm();
     });
     window.addEventListener('pagehide', pauseBgm);
-    window.addEventListener('pageshow', startBgm);
+    window.addEventListener('pageshow', () => {
+      clearMediaSession();
+      startBgm();
+    });
 
+    clearMediaSession();
     return { unlockAndStartBgm, setBgmEnabled, startBgm, pauseBgm, playTap, playAnswer };
   })();
 
@@ -347,7 +466,8 @@
   function renderCategory() {
     const cards = Object.entries(CATEGORIES).map(([id,c]) => `
       <button class="category-card" data-action="play-category" data-category="${id}">
-        <span class="category-icon">${c.icon}</span><span>${escapeHTML(c.label)}</span>
+        <img class="category-icon" src="${c.icon}" alt="" aria-hidden="true">
+        <span>${escapeHTML(c.label)}</span>
       </button>`).join('');
     el.innerHTML = `${header('カテゴリ')}
       <button class="omakase-card" data-action="play-all">おまかせ</button>

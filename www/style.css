@@ -200,3 +200,125 @@ button{font:inherit;color:inherit}
   body{padding:24px;height:100vh}
   .app-shell{height:calc(100vh - 48px);max-height:calc(100vh - 48px);border-radius:28px;box-shadow:0 20px 60px rgba(36,52,71,.12)}
 }
+
+/* v1.2 visual polish + iPhone zoom/scroll guards */
+html,body{
+  max-width:100vw;
+  overscroll-behavior:none;
+  touch-action:manipulation;
+  -webkit-text-size-adjust:100%;
+}
+body,.app-shell,.screen{overflow-x:hidden}
+button,.btn,.icon-btn,.category-card,.omakase-card,.switch{touch-action:manipulation;-webkit-tap-highlight-color:transparent}
+.screen.scrollable{touch-action:pan-y}
+
+.screen{
+  background-repeat:no-repeat;
+  background-size:cover;
+  background-position:center;
+  isolation:isolate;
+}
+.screen-home{
+  background-image:linear-gradient(180deg,rgba(255,255,255,.16),rgba(255,253,248,.36) 48%,rgba(255,253,248,.72)),url('images/home_bg.webp');
+}
+.screen-category,
+.screen-favorites{
+  background-image:linear-gradient(180deg,rgba(255,255,255,.68),rgba(255,253,248,.80)),url('images/category_bg.webp');
+}
+.screen-quiz{
+  background-image:linear-gradient(180deg,rgba(255,255,255,.74),rgba(255,253,248,.76)),url('images/quiz_bg.webp');
+}
+.screen-quiz.screen-answer{
+  background-image:linear-gradient(180deg,rgba(255,255,255,.72),rgba(255,248,235,.72)),url('images/answer_bg.webp');
+}
+.screen-settings{
+  background-image:linear-gradient(180deg,rgba(255,255,255,.70),rgba(255,253,248,.82)),url('images/settings_bg.webp');
+}
+
+.header{grid-template-columns:84px 1fr 84px;position:relative;z-index:2}
+.header-actions{display:flex;justify-content:flex-end;gap:4px;min-width:84px}
+.glass-btn{
+  background:rgba(255,255,255,.72);
+  border:1px solid rgba(255,255,255,.88);
+  box-shadow:0 4px 14px rgba(36,52,71,.10);
+  backdrop-filter:blur(8px);
+  -webkit-backdrop-filter:blur(8px);
+}
+.header-title{
+  text-shadow:0 1px 0 rgba(255,255,255,.9);
+}
+
+.screen-home .logo-wrap{
+  padding:18px 12px;
+  border-radius:28px;
+  background:rgba(255,255,255,.48);
+  border:1px solid rgba(255,255,255,.78);
+  box-shadow:0 10px 30px rgba(36,52,71,.08);
+  backdrop-filter:blur(6px);
+  -webkit-backdrop-filter:blur(6px);
+}
+.screen-home .logo{color:#163D5A;text-shadow:0 2px 0 rgba(255,255,255,.8)}
+.screen-home .subtitle{color:#178C9A}
+.screen-home .btn-primary,.omakase-card{
+  background:linear-gradient(135deg,#25B7C8,#1799B2);
+  box-shadow:0 8px 22px rgba(25,153,178,.24);
+}
+.screen-home .btn-secondary{
+  background:rgba(255,255,255,.88);
+  box-shadow:0 7px 20px rgba(36,52,71,.10);
+}
+.screen-home .btn-favorite{
+  background:rgba(255,255,255,.88);
+  box-shadow:0 7px 20px rgba(255,107,107,.10);
+}
+
+.category-card,.favorite-card,.setting-row,.info-card,.explanation{
+  background:rgba(255,255,255,.88);
+  border-color:rgba(255,255,255,.92);
+  backdrop-filter:blur(8px);
+  -webkit-backdrop-filter:blur(8px);
+}
+.category-card{box-shadow:0 5px 16px rgba(36,52,71,.09)}
+.category-card:active{transform:scale(.985)}
+
+.quiz-content{
+  border-radius:24px;
+  padding:clamp(10px,1.8vh,16px) 12px;
+  background:rgba(255,255,255,.54);
+  border:1px solid rgba(255,255,255,.76);
+  box-shadow:0 10px 34px rgba(36,52,71,.08);
+  backdrop-filter:blur(7px);
+  -webkit-backdrop-filter:blur(7px);
+  contain:paint;
+}
+.q-label{
+  width:36px;height:36px;margin-left:auto;margin-right:auto;
+  display:grid;place-items:center;border-radius:999px;
+  background:rgba(39,183,199,.14);letter-spacing:0;
+}
+.question{text-shadow:0 1px 0 rgba(255,255,255,.9)}
+.answer-block{overflow:hidden;border-radius:18px}
+.answer-value{color:#D98D00;text-shadow:0 2px 0 rgba(255,255,255,.85)}
+.answer-value.bounce{animation:answerBounceSafe .44s cubic-bezier(.2,.9,.3,1.18)}
+
+.settings-label{color:#4E6677}
+.switch.on{background:linear-gradient(135deg,#27B7C7,#159AAA)}
+.banner-ad{background:rgba(247,250,250,.96)}
+
+@keyframes answerBounceSafe{
+  0%{opacity:0;transform:scale(.88)}
+  48%{opacity:1;transform:scale(1.06)}
+  74%{transform:scale(.985)}
+  100%{transform:scale(1)}
+}
+
+@media (max-width:360px){
+  .header{grid-template-columns:76px 1fr 76px}
+  .header-actions{min-width:76px;gap:0}
+  .icon-btn{width:36px;height:36px}
+}
+
+@media (max-height:700px){
+  .screen-home .logo-wrap{padding:12px 10px;margin:18px 0 20px}
+  .quiz-content{padding:8px 10px;border-radius:20px}
+}

@@ -2,9 +2,23 @@
 (() => {
   'use strict';
 
-  const DB = window.HMQ_DATABASE;
-  if (!DB || !Array.isArray(DB.questions)) {
-    document.body.innerHTML = '<p>問題データを読み込めませんでした。</p>';
+  const DATA_PARTS = Array.isArray(window.HMQ_DATABASE_PARTS) ? window.HMQ_DATABASE_PARTS : [];
+  const ALL_QUESTIONS = DATA_PARTS.flatMap(part => Array.isArray(part?.questions) ? part.questions : []);
+  const DB = {
+    meta: {
+      title: 'どのくらい？ - 予想！数字クイズ',
+      version: '1.1.0',
+      questionCount: ALL_QUESTIONS.length,
+      categoryCounts: {"human": 238, "animal": 303, "life": 247, "food": 236, "earth": 295, "science": 277, "space": 205, "japan": 163, "world": 317, "transport": 232, "sports": 214, "history": 273},
+      verifiedCount: 620,
+      provisionalCount: 2380,
+      generatedAt: '2026-10-04',
+      buildPurpose: 'release'
+    },
+    questions: ALL_QUESTIONS
+  };
+  if (DB.questions.length !== 3000) {
+    document.body.innerHTML = `<p>問題データを正しく読み込めませんでした。（${DB.questions.length} / 3000問）</p>`;
     return;
   }
 
@@ -174,9 +188,43 @@
     showFirstHint: localStorage.getItem(LS.firstHint) !== 'done',
     adCount: Number(sessionStorage.getItem(SS.adCount) || 0),
     adTarget: Number(sessionStorage.getItem(SS.adTarget) || randomInt(18, 22)),
-    lastCategories: []
+    lastCategories: [],
+    settingsReturnScreen: 'home'
   };
   persistAdState();
+
+  const nativeHaptics = (() => {
+    const cap = window.Capacitor;
+    const isNative = !!(cap && typeof cap.isNativePlatform === 'function' && cap.isNativePlatform());
+    let Haptics = null;
+
+    function plugin() {
+      if (Haptics) return Haptics;
+      try {
+        if (cap?.registerPlugin) Haptics = cap.registerPlugin('Haptics');
+        if (!Haptics && cap?.Plugins?.Haptics) Haptics = cap.Plugins.Haptics;
+      } catch {}
+      return Haptics;
+    }
+
+    async function impact(style = 'LIGHT') {
+      if (!state.vibration) return;
+      const haptics = plugin();
+      if (isNative && haptics) {
+        try {
+          await haptics.impact({ style });
+          return;
+        } catch (e) {
+          console.warn('Haptics impact failed', e);
+        }
+      }
+      try {
+        if (navigator.vibrate) navigator.vibrate(style === 'MEDIUM' ? 35 : 22);
+      } catch {}
+    }
+
+    return { impact };
+  })();
 
   const audioFX = (() => {
     const bgm = new Audio('audio/bgm_main.mp3');
@@ -265,14 +313,17 @@
 
   function header(title, right='') {
     return `<div class="header">
-      <button class="icon-btn" data-action="back" aria-label="戻る">‹</button>
+      <button class="icon-btn glass-btn" data-action="back" aria-label="戻る">‹</button>
       <div class="header-title">${escapeHTML(title)}</div>
-      <div>${right}</div>
+      <div class="header-actions">${right}</div>
     </div>`;
   }
 
   function render() {
-    el.classList.toggle('scrollable', state.screen === 'favorites');
+    el.className = 'screen';
+    el.classList.add(`screen-${state.screen}`);
+    if (state.screen === 'favorites') el.classList.add('scrollable');
+    if (state.screen === 'quiz' && state.answerShown) el.classList.add('screen-answer');
     if (state.screen === 'home') renderHome();
     else if (state.screen === 'category') renderCategory();
     else if (state.screen === 'quiz') renderQuiz();
@@ -284,7 +335,7 @@
 
   function renderHome() {
     el.innerHTML = `
-      <div class="header"><div></div><div></div><button class="icon-btn" data-action="settings" aria-label="設定">⚙</button></div>
+      <div class="header"><div></div><div></div><button class="icon-btn glass-btn" data-action="settings" aria-label="設定">⚙</button></div>
       <div class="logo-wrap"><h1 class="logo">どのくらい？</h1><p class="subtitle">予想！数字クイズ</p></div>
       <div class="stack">
         <button class="btn btn-primary" data-action="play-all">おまかせで遊ぶ</button>
@@ -308,7 +359,9 @@
     const q = state.current;
     const catLabel = state.quizMode === 'all' ? 'おまかせ' : state.quizMode === 'favorites' ? 'お気に入り' : (CATEGORIES[q.category]?.label || q.category);
     const fav = state.favorites.has(q.id);
-    const favButton = `<button class="icon-btn ${fav?'favorite-active':''}" data-action="toggle-favorite" aria-label="お気に入り">${fav?'♥':'♡'}</button>`;
+    const favButton = `<button class="icon-btn glass-btn ${fav?'favorite-active':''}" data-action="toggle-favorite" aria-label="お気に入り">${fav?'♥':'♡'}</button>`;
+    const settingsButton = `<button class="icon-btn glass-btn" data-action="settings" aria-label="設定">⚙</button>`;
+    const quizHeaderActions = `${favButton}${settingsButton}`;
     let body;
     if (!state.answerShown) {
       body = `<div class="quiz-content">
@@ -328,7 +381,7 @@
         <div class="quiz-actions"><button class="btn btn-primary" style="width:100%" data-action="next-question">次の問題</button></div>
       </div>`;
     }
-    el.innerHTML = `<div class="quiz-wrap">${header(catLabel, favButton)}${body}</div>`;
+    el.innerHTML = `<div class="quiz-wrap">${header(catLabel, quizHeaderActions)}${body}</div>`;
   }
 
   function renderFavorites() {
@@ -354,10 +407,10 @@
       </div>
       <div class="settings-group"><div class="settings-label">このアプリについて</div>
         <div class="info-card"><strong>どのくらい？ - 予想！数字クイズ</strong><br>数字を予想して、答えを見て楽しむクイズアプリです。回答入力やスコアはありません。</div>
-        <div class="info-card">1500問のクイズデータを端末内に収録しています。</div>
+        <div class="info-card">3000問のクイズデータを端末内に収録しています。</div>
         <button class="btn btn-secondary privacy-btn" data-action="privacy-options">広告のプライバシー設定</button>
       </div>
-      <div class="version">HowMuchQuiz v1.0 / 1500問</div>`;
+      <div class="version">HowMuchQuiz v1.1 / 3000問</div>`;
   }
 
   function bindActions() {
@@ -367,7 +420,7 @@
       audioFX.unlockAndStartBgm();
       if (action !== 'show-answer') audioFX.playTap();
       if (action === 'back') goBack();
-      else if (action === 'settings') { state.screen='settings'; render(); }
+      else if (action === 'settings') { state.settingsReturnScreen = state.screen === 'settings' ? 'home' : state.screen; state.screen='settings'; render(); }
       else if (action === 'category') { state.screen='category'; render(); }
       else if (action === 'favorites') { state.screen='favorites'; render(); }
       else if (action === 'play-all') startQuiz('all');
@@ -385,14 +438,20 @@
         render();
       }
       else if (action === 'toggle-sound') { state.sound=!state.sound; localStorage.setItem(LS.sound,String(state.sound)); render(); }
-      else if (action === 'toggle-vibration') { state.vibration=!state.vibration; localStorage.setItem(LS.vibration,String(state.vibration)); render(); }
+      else if (action === 'toggle-vibration') { state.vibration=!state.vibration; localStorage.setItem(LS.vibration,String(state.vibration)); if (state.vibration) nativeHaptics.impact('LIGHT'); render(); }
       else if (action === 'privacy-options') { nativeAds.showPrivacyOptions().then(ok => { if (!ok) showToast('現在、変更できる広告設定はありません'); }); }
     }));
   }
 
   function goBack() {
-    if (state.screen === 'quiz') state.screen = state.quizMode === 'category' ? 'category' : (state.quizMode === 'favorites' ? 'favorites' : 'home');
-    else state.screen = 'home';
+    if (state.screen === 'quiz') {
+      state.screen = state.quizMode === 'category' ? 'category' : (state.quizMode === 'favorites' ? 'favorites' : 'home');
+    } else if (state.screen === 'settings') {
+      state.screen = state.settingsReturnScreen || 'home';
+      state.settingsReturnScreen = 'home';
+    } else {
+      state.screen = 'home';
+    }
     render();
   }
 
@@ -473,7 +532,7 @@
 
   function playRevealEffects() {
     audioFX.playAnswer();
-    if (state.vibration && navigator.vibrate) navigator.vibrate(28);
+    nativeHaptics.impact('MEDIUM');
   }
 
   function showToast(text) {

@@ -227,7 +227,8 @@
   })();
 
   const audioFX = (() => {
-    // Web Audio APIを使うことで、iOSロック画面にBGMのメディア再生UIを残さない。
+    // BGM is decoded with Web Audio API so iOS does not expose a persistent
+    // lock-screen media controller. Short SEs have an HTMLAudio fallback only.
     const FILES = {
       bgm: 'audio/bgm_main.mp3',
       tap: 'audio/se_tap.mp3',
@@ -239,7 +240,9 @@
     let master = null;
     let unlocked = false;
     const buffers = new Map();
-    const loads = new Map();
+    const binaryCache = new Map();
+    const binaryLoads = new Map();
+    const decodeLoads = new Map();
 
     let bgmSource = null;
     let bgmGain = null;
@@ -260,53 +263,112 @@
       if (ctx) return ctx;
       const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
       if (!AudioContextCtor) return null;
-      ctx = new AudioContextCtor();
-      master = ctx.createGain();
-      master.gain.value = 1;
-      master.connect(ctx.destination);
+      try {
+        ctx = new AudioContextCtor();
+        master = ctx.createGain();
+        master.gain.value = 1;
+        master.connect(ctx.destination);
+      } catch (e) {
+        console.warn('AudioContext init failed', e);
+        ctx = null;
+        master = null;
+      }
       clearMediaSession();
       return ctx;
     }
 
-    async function resumeContext() {
-      const c = ensureContext();
-      if (!c) return null;
-      try {
-        if (c.state === 'suspended') await c.resume();
-      } catch {}
-      clearMediaSession();
-      return c;
+    function assetUrl(key) {
+      try { return new URL(FILES[key], document.baseURI).href; }
+      catch { return FILES[key]; }
     }
 
-    async function loadBuffer(key) {
-      if (buffers.has(key)) return buffers.get(key);
-      if (loads.has(key)) return loads.get(key);
-      const task = (async () => {
-        try {
-          const c = ensureContext();
-          if (!c) return null;
-          const res = await fetch(FILES[key]);
-          if (!res.ok) throw new Error(`Audio fetch failed: ${FILES[key]}`);
-          const arr = await res.arrayBuffer();
-          const buf = await c.decodeAudioData(arr);
-          buffers.set(key, buf);
-          return buf;
-        } catch (e) {
-          console.warn(`Audio load failed: ${key}`, e);
-          return null;
-        } finally {
-          loads.delete(key);
-        }
-      })();
-      loads.set(key, task);
+    // WKWebView/Capacitor can be less reliable with fetch() for bundled binary
+    // resources. XHR + arraybuffer is intentionally used here.
+    function loadBinary(key) {
+      if (binaryCache.has(key)) return Promise.resolve(binaryCache.get(key));
+      if (binaryLoads.has(key)) return binaryLoads.get(key);
+      const task = new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('GET', assetUrl(key), true);
+        xhr.responseType = 'arraybuffer';
+        xhr.onload = () => {
+          if ((xhr.status >= 200 && xhr.status < 300) || xhr.status === 0) {
+            if (xhr.response && xhr.response.byteLength > 0) {
+              binaryCache.set(key, xhr.response);
+              resolve(xhr.response);
+            } else reject(new Error(`Empty audio asset: ${FILES[key]}`));
+          } else reject(new Error(`Audio XHR failed ${xhr.status}: ${FILES[key]}`));
+        };
+        xhr.onerror = () => reject(new Error(`Audio XHR network error: ${FILES[key]}`));
+        xhr.send();
+      }).catch(e => {
+        console.warn(`Audio binary load failed: ${key}`, e);
+        return null;
+      }).finally(() => binaryLoads.delete(key));
+      binaryLoads.set(key, task);
       return task;
     }
 
+    async function decodeBuffer(key) {
+      if (buffers.has(key)) return buffers.get(key);
+      if (decodeLoads.has(key)) return decodeLoads.get(key);
+      const task = (async () => {
+        const c = ensureContext();
+        if (!c) return null;
+        const arr = await loadBinary(key);
+        if (!arr) return null;
+        try {
+          // Safari may detach the ArrayBuffer passed to decodeAudioData.
+          const copy = arr.slice(0);
+          const buf = await c.decodeAudioData(copy);
+          buffers.set(key, buf);
+          return buf;
+        } catch (e) {
+          console.warn(`Audio decode failed: ${key}`, e);
+          return null;
+        }
+      })().finally(() => decodeLoads.delete(key));
+      decodeLoads.set(key, task);
+      return task;
+    }
+
+    function resumeFromUserGesture() {
+      const c = ensureContext();
+      if (!c) return Promise.resolve(null);
+      try {
+        const p = c.state === 'suspended' ? c.resume() : Promise.resolve();
+        return Promise.resolve(p).then(() => c).catch(e => {
+          console.warn('AudioContext resume failed', e);
+          return c;
+        });
+      } catch (e) {
+        console.warn('AudioContext resume failed', e);
+        return Promise.resolve(c);
+      }
+    }
+
+    function playHtmlSeFallback(key) {
+      if (key === 'bgm') return;
+      try {
+        const a = new Audio(assetUrl(key));
+        a.preload = 'auto';
+        a.volume = VOLUMES[key];
+        const p = a.play();
+        if (p?.catch) p.catch(() => {});
+      } catch {}
+    }
+
     async function playOneShot(key) {
-      const c = await resumeContext();
-      if (!c) return;
-      const buffer = await loadBuffer(key);
-      if (!buffer) return;
+      const c = await resumeFromUserGesture();
+      if (!c || c.state !== 'running') {
+        playHtmlSeFallback(key);
+        return;
+      }
+      const buffer = await decodeBuffer(key);
+      if (!buffer) {
+        playHtmlSeFallback(key);
+        return;
+      }
       try {
         const source = c.createBufferSource();
         const gain = c.createGain();
@@ -317,15 +379,16 @@
         source.start(0);
       } catch (e) {
         console.warn(`Audio play failed: ${key}`, e);
+        playHtmlSeFallback(key);
       }
       clearMediaSession();
     }
 
     async function startBgm() {
       if (!unlocked || !state.bgm || document.hidden || bgmSource) return;
-      const c = await resumeContext();
-      if (!c || !state.bgm || document.hidden || bgmSource) return;
-      const buffer = await loadBuffer('bgm');
+      const c = await resumeFromUserGesture();
+      if (!c || c.state !== 'running' || !state.bgm || document.hidden || bgmSource) return;
+      const buffer = await decodeBuffer('bgm');
       if (!buffer || !state.bgm || document.hidden || bgmSource) return;
       try {
         const source = c.createBufferSource();
@@ -379,12 +442,15 @@
 
     function unlockAndStartBgm() {
       unlocked = true;
-      resumeContext().then(startBgm);
+      // resume() is initiated immediately from the tap/click handler.
+      resumeFromUserGesture().then(() => startBgm());
     }
 
     function setBgmEnabled(enabled) {
-      if (enabled) startBgm();
-      else pauseBgm();
+      if (enabled) {
+        unlocked = true;
+        resumeFromUserGesture().then(() => startBgm());
+      } else pauseBgm();
     }
 
     function playTap() {
@@ -397,14 +463,17 @@
       playOneShot('answer');
     }
 
+    // Preload bundled bytes only. AudioContext is resumed only after user input.
+    ['bgm', 'tap', 'answer'].forEach(key => loadBinary(key));
+
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) pauseBgm();
-      else startBgm();
+      else if (unlocked) startBgm();
     });
     window.addEventListener('pagehide', pauseBgm);
     window.addEventListener('pageshow', () => {
       clearMediaSession();
-      startBgm();
+      if (unlocked) startBgm();
     });
 
     clearMediaSession();
